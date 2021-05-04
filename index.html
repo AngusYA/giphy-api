@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="A website to view trending gifs and search for any gifs." />
+    <meta name="title" property="og:title" content="Giphy API" />
+    <meta property="og:type" content="Website" />
+    <meta name="image" property="og:image" content="https://live.staticflickr.com/65535/51045432372_e7a9a75619_b.jpg" />
+    <meta name="description" property="og:description" content="Giphy API website" />
+    <meta name="author" content="Angus Yeh" />
+    <title>Giphy API</title>
+    <link rel="stylesheet" type="text/css" href="css/normalize.css">
+    <link rel="stylesheet" type="text/css" href="css/styles.css">
+</head>
+<body onload="loadList()">
+    <div id="spinner"></div>
+    <a id="mobileLogo" href="index.html"><h1>GIPHY API</h1></a>
+    <header id="global-header">
+        <a id="logo" href="index.html"><h1>GIPHY API</h1></a>
+        <div class="search">
+            <form id="searchForm" class="search-form">
+                <label for="search"></label>
+                <input type="text" id="searchInput" name="search" placeholder="Search Gifs">
+                <button type="submit">Search</button>
+            </form>
+        </div>
+    </header>
+    <div class="top-heading">
+        <h3 id="title" style="margin-left: 20px;">Trending</h3>
+        <div id="link" onclick="trendingInit()">All Gifs &roarr;</div>
+    </div>
+    <div id="listContainer" class="list-container"></div>
+    <div id="resultContainer" class="result-container">
+        <div class="grid-sizer"></div>
+        <div class="gutter-sizer"></div>
+    </div>
+    <div id="loadMoreSignal"></div>
+    
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <script src="js/isotope.pkgd.min.js"></script>
+    <script src="js/masonry-horizontal.js"></script>
+
+    <script>
+        var apiKey = 'nV1UHKJ6wu4nTYO22e4UCJIPwdUtUviA';
+
+        // Horizontal List
+
+        function loadList() {
+            $('#spinner').addClass('loading');
+
+            $.ajax('https://api.giphy.com/v1/gifs/trending?api_key=' + apiKey)
+                .done(function(result) {
+                    var data = result.data;
+                    
+                    addToListContainer(data);
+                    $('#listContainer').isotope({
+                        layoutMode: 'masonryHorizontal',
+                        itemSelector: '.list-gif-box',
+                        masonryHorizontal: {
+                            rowHeight: 100,
+                            gutter: 20
+                        }
+                    });
+                    $('#spinner').removeClass('loading');
+                })
+                .fail(function(xhr,status,error) {
+                    alert('error: ' + xhr.status);
+                    $('#spinner').removeClass('loading');
+                })
+        }
+
+        function addToListContainer(result) {
+            var myListContainer = document.querySelector('#listContainer');
+
+            for (let i = 0; i < result.length; i++) {
+                var gifBox = document.createElement('div');
+                gifBox.classList.add('list-gif-box');
+                gifBox.style.width = result[i].images.fixed_height_small.width + 'px';
+
+                var gifLink = document.createElement('a');
+                gifLink.setAttribute('href', result[i].url);
+                gifLink.setAttribute('target', '_blank');
+
+                var gifPic = document.createElement('picture');
+                var gifSrcWebp = document.createElement('source');
+                $(gifSrcWebp).attr({
+                    srcset: result[i].images.fixed_height.webp,
+                    type: 'image/webp'
+                });
+                var gifSrcSmall = document.createElement('source');
+                $(gifSrcSmall).attr({
+                    srcset: result[i].images.fixed_height_small.url,
+                    type: 'image/gif'
+                });
+                var gif = document.createElement('img');
+                gif.src = result[i].images.fixed_height.url;
+
+                gifPic.appendChild(gifSrcWebp);
+                gifPic.appendChild(gifSrcSmall);
+                gifPic.appendChild(gif);
+                gifLink.appendChild(gifPic);
+                gifBox.appendChild(gifLink);
+                myListContainer.appendChild(gifBox);
+            }
+
+            var gifBox = document.createElement('div');
+            gifBox.innerText = 'See All'
+            gifBox.classList.add('list-gif-box', 'list-text-box');
+            gifBox.setAttribute('onclick', 'trendingInit()');
+            myListContainer.appendChild(gifBox);
+        }
+
+        var offset;
+        var pageSize = 50;
+        var firstLoad = true;
+        var $grid;
+        var noData;
+        var loadPoint;
+        var searchInput = document.getElementById('searchInput');
+        var searchForm = document.getElementById('searchForm');
+        var myResultContainer = document.querySelector('#resultContainer');
+
+        // Search Data
+        
+        searchForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            $('.top-heading').css({
+                'margin': '20px auto 0 auto',
+                'width': 'calc(100% - 40px)',
+                'max-width': '1080px'
+            });
+            $('#title').css('margin-left', '0');
+            $('#link').css('margin-right', '0');
+            $('#title').html('Result for <span id="currInputValue" style="color:#dc4d26;">' + searchInput.value + '</span>');
+            $('#listContainer').hide();
+            $('#resultContainer').show();
+            $('#loadMoreSignal').show();
+            offset = 0;
+            noData = false;
+            if ($('.grid-gif-box').length > 0) {
+                myResultContainer.querySelectorAll('.grid-gif-box').forEach(n => n.remove());
+                $grid.masonry();
+            }
+            $('#spinner').addClass('loading');
+            $(document).off('scroll');
+            loadSearchResult(searchInput.value, loadSearchCallback);
+            searchInput.value = '';
+        });
+
+        function loadSearchResult(userInput, callback) {
+            $.ajax('https://api.giphy.com/v1/gifs/search?api_key=' + apiKey + '&q=' + userInput + '&limit=' + pageSize + '&offset=' + offset)
+                .done(function(result) {
+                    var data = result.data;
+                    
+                    // if no data, inform users
+                    if (data.length === 0) {
+                        if (userInput === '') {
+                            alert('Please enter keywords to search.');
+                        } else if (result.pagination.total_count === 0 && offset === 0) {
+                            alert('No gifs found!');
+                        } else {
+                            alert('This is the end!');
+                        }
+                        noData = true;
+                        $('#spinner').removeClass('loading');
+                        $('#loadMoreSignal').hide();
+                    }
+
+                    // first load
+                    if (offset === 0 && firstLoad === true && data.length > 0) {
+                        firstLoad = false;
+                        addToResultContainer(data);
+                        $grid = $('#resultContainer').masonry({
+                            columnWidth: '.grid-sizer',
+                            itemSelector: '.grid-gif-box',
+                            gutter: '.gutter-sizer',
+                            percentPosition: true
+                        });
+                        offset += data.length;
+                        loadPoint = 30 + $('#mobileLogo').innerHeight() + $('#global-header').innerHeight() + $('.top-heading').innerHeight() + $('#resultContainer').innerHeight();
+                        callback();
+                        if ($(window).innerHeight() < loadPoint) {
+                            $(document).on('scroll', function() {
+                                scrollToLoadSearch(this);
+                            });
+                        }
+
+                    // search again and scroll down to load                        
+                    } else if (offset >= 0 && firstLoad === false && data.length > 0) {
+                        var $elems = appendToResultContainer(data);
+                        $grid.append($elems).masonry('appended', $elems);
+                        loadPoint = 30 + $('#mobileLogo').innerHeight() + $('#global-header').innerHeight() + $('.top-heading').innerHeight() + $('#resultContainer').innerHeight();
+                        if (offset === 0) {
+                            offset += data.length;
+                            callback();
+                        } else {
+                            offset += data.length;
+                            $('#loadMoreSignal').text('');
+                        }
+                        if ($(window).innerHeight() < loadPoint) {
+                            $(document).on('scroll', function() {
+                                scrollToLoadSearch(this);
+                            });
+                        }
+                        $('#spinner').removeClass('loading');
+                    }                    
+                })
+                .fail(function(xhr,status,error) {
+                    alert('error: ' + xhr.status);
+                    $('#spinner').removeClass('loading');
+                    $('#loadMoreSignal').text('');
+                })
+        }
+
+        function loadSearchCallback() {
+            if ($(window).innerHeight() >= loadPoint) {
+                loadSearchResult($('#currInputValue').text());
+            } else {
+                $('#spinner').removeClass('loading');
+            }
+        }
+
+        function scrollToLoadSearch(page) {
+            if ($(page).scrollTop() + $(window).innerHeight() >= loadPoint && noData !== true) {
+                $(document).off('scroll');
+                $('#loadMoreSignal').text('Loading...');
+                loadSearchResult($('#currInputValue').text());
+            }
+        }
+
+        // Trending Data
+
+        function trendingInit() {
+            $('.top-heading').css({
+                'margin': '20px auto 0 auto',
+                'width': 'calc(100% - 40px)',
+                'max-width': '1080px'
+            });
+            $('#title').css('margin-left', '0');
+            $('#link').css('margin-right', '0');
+            $('#title').html('Trending');
+            $('#listContainer').hide();
+            $('#resultContainer').show();
+            $('#loadMoreSignal').show();
+            offset = 0;
+            noData = false;
+            if ($('.grid-gif-box').length > 0) {
+                myResultContainer.querySelectorAll('.grid-gif-box').forEach(n => n.remove());
+                $grid.masonry();
+            }
+            $('#spinner').addClass('loading');
+            $(document).off('scroll');
+            loadTrending(loadTrendingCallback);
+        }
+
+        function loadTrending(callback) {  
+            $.ajax('https://api.giphy.com/v1/gifs/trending?api_key=' + apiKey + '&limit=' + pageSize + '&offset=' + offset)
+                .done(function(result) {
+                    var data = result.data;
+
+                    // if no data, inform users
+                    if (data.length === 0) {
+                        alert('This is the end!');
+                        noData = true;
+                        $('#loadMoreSignal').hide();
+                    }
+                    
+                    // first load
+                    if (offset === 0 && firstLoad === true && data.length > 0) {
+                        firstLoad = false;
+                        addToResultContainer(data);
+                        $grid = $('#resultContainer').masonry({
+                            columnWidth: '.grid-sizer',
+                            itemSelector: '.grid-gif-box',
+                            gutter: '.gutter-sizer',
+                            percentPosition: true
+                        });
+                        offset += data.length;
+                        loadPoint = 30 + $('#mobileLogo').innerHeight() + $('#global-header').innerHeight() + $('.top-heading').innerHeight() + $('#resultContainer').innerHeight();
+                        callback();
+                        if ($(window).innerHeight() < loadPoint) {
+                            $(document).on('scroll', function() {
+                                scrollToLoadTrending(this);
+                            });
+                        }
+
+                    // beyond first load
+                    } else if (offset >= 0 && firstLoad === false && data.length > 0) {
+                        var $elems = appendToResultContainer(data);
+                        $grid.append($elems).masonry('appended', $elems);
+                        loadPoint = 30 + $('#mobileLogo').innerHeight() + $('#global-header').innerHeight() + $('.top-heading').innerHeight() + $('#resultContainer').innerHeight();
+                        if (offset === 0) {
+                            offset += data.length;
+                            callback();
+                        } else {
+                            offset += data.length;
+                            $('#loadMoreSignal').text('');
+                        }
+                        $(document).on('scroll', function() {
+                            scrollToLoadTrending(this);
+                        });
+                        $('#spinner').removeClass('loading');
+                    }
+                })
+                .fail(function(xhr,status,error) {
+                    alert('error: ' + xhr.status);
+                    $('#spinner').removeClass('loading');
+                    $('#loadMoreSignal').text('');
+                })
+        }
+
+        function loadTrendingCallback() {
+            if ($(window).innerHeight() >= loadPoint) {
+                loadTrending();
+            } else {
+                $('#spinner').removeClass('loading');
+            }
+        }
+
+        function scrollToLoadTrending(page) {
+            if ($(page).scrollTop() + $(window).innerHeight() >= loadPoint && noData !== true) {
+                $(document).off('scroll');
+                $('#loadMoreSignal').text('Loading...');
+                loadTrending();
+            }
+        }
+
+        function addToResultContainer(result) {
+            var gifBoxWidth = window.innerWidth > 480 ? $(myResultContainer).innerWidth() * 18 / 100 : $(myResultContainer).innerWidth() * 32 / 100;
+
+            for (let i = 0; i < result.length; i++) {
+                var gifBox = document.createElement('div');
+                gifBox.classList.add('grid-gif-box');
+                var gifBoxRatio = parseInt(result[i].images.original.height) / parseInt(result[i].images.original.width);
+                gifBox.style.height = gifBoxWidth * gifBoxRatio + 4 + 'px';
+
+                var gifLink = document.createElement('a');
+                gifLink.setAttribute('href', result[i].url);
+                gifLink.setAttribute('target', '_blank');
+
+                var gifPic = document.createElement('picture');
+                var gifSrcWebp = document.createElement('source');
+                $(gifSrcWebp).attr({
+                    srcset: result[i].images.fixed_width.webp,
+                    type: 'image/webp'
+                });
+                var gifSrcSmall = document.createElement('source');
+                $(gifSrcSmall).attr({
+                    srcset: result[i].images.fixed_width_small.url,
+                    type: 'image/gif'
+                });
+                var gif = document.createElement('img');
+                gif.src = result[i].images.fixed_width.url;
+
+                gifPic.appendChild(gifSrcWebp);
+                gifPic.appendChild(gifSrcSmall);
+                gifPic.appendChild(gif);
+                gifLink.appendChild(gifPic);
+                gifBox.appendChild(gifLink);
+                myResultContainer.appendChild(gifBox);
+            }
+        }
+
+        function appendToResultContainer(result) {
+            var gifBoxWidth = window.innerWidth > 480 ? $(myResultContainer).innerWidth() * 18 / 100 : $(myResultContainer).innerWidth() * 32 / 100;
+            var gifBoxArr = [];
+
+            for (let i = 0; i < result.length; i++) {
+                var gifBox = document.createElement('div');
+                gifBox.classList.add('grid-gif-box');
+                var gifBoxRatio = parseInt(result[i].images.original.height) / parseInt(result[i].images.original.width);
+                gifBox.style.height = gifBoxWidth * gifBoxRatio + 4 + 'px';
+
+                var gifLink = document.createElement('a');
+                gifLink.setAttribute('href', result[i].url);
+                gifLink.setAttribute('target', '_blank');
+
+                var gifPic = document.createElement('picture');
+                var gifSrcWebp = document.createElement('source');
+                $(gifSrcWebp).attr({
+                    srcset: result[i].images.fixed_width.webp,
+                    type: 'image/webp'
+                });
+                var gifSrcSmall = document.createElement('source');
+                $(gifSrcSmall).attr({
+                    srcset: result[i].images.fixed_width_small.url,
+                    type: 'image/gif'
+                });
+                var gif = document.createElement('img');
+                gif.src = result[i].images.fixed_width.url;
+
+                gifPic.appendChild(gifSrcWebp);
+                gifPic.appendChild(gifSrcSmall);
+                gifPic.appendChild(gif);
+                gifLink.appendChild(gifPic);
+                gifBox.appendChild(gifLink);
+                gifBoxArr.push(gifBox);
+            }
+
+            return gifBoxArr;
+        }
+
+        $(window).resize(function() {
+            if ($('.grid-gif-box').length > 0) {
+                for (let i = 0; i < $('.grid-gif-box').length; i++) {
+                    $('.grid-gif-box')[i].style.height = 'revert';
+                }
+            }
+        })
+    </script>
+</body>
+</html>
